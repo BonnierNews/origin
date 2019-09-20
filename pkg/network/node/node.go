@@ -30,7 +30,7 @@ import (
 	kclientset "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
 	kinternalinformers "k8s.io/kubernetes/pkg/client/informers/informers_generated/internalversion"
 	kubeletapi "k8s.io/kubernetes/pkg/kubelet/apis/cri"
-	kruntimeapi "k8s.io/kubernetes/pkg/kubelet/apis/cri/v1alpha1/runtime"
+	kruntimeapi "k8s.io/kubernetes/pkg/kubelet/apis/cri/runtime/v1alpha2"
 	knetwork "k8s.io/kubernetes/pkg/kubelet/network"
 	ktypes "k8s.io/kubernetes/pkg/kubelet/types"
 	"k8s.io/kubernetes/pkg/proxy/apis/kubeproxyconfig"
@@ -75,6 +75,7 @@ type OsdnNodeConfig struct {
 	RuntimeEndpoint string
 	MTU             uint32
 	EnableHostports bool
+	CNIBinDir       string
 	CNIConfDir      string
 
 	NetworkClient networkclient.Interface
@@ -112,8 +113,6 @@ type OsdnNode struct {
 
 	host             knetwork.Host
 	kubeletCniPlugin knetwork.NetworkPlugin
-
-	hostSubnetMap map[string]*networkapi.HostSubnet
 
 	kubeInformers    kinternalinformers.SharedInformerFactory
 	networkInformers networkinformers.SharedInformerFactory
@@ -174,7 +173,7 @@ func New(c *OsdnNodeConfig) (network.NodeInterface, error) {
 		networkClient:      c.NetworkClient,
 		recorder:           c.Recorder,
 		oc:                 oc,
-		podManager:         newPodManager(c.KClient, policy, c.MTU, oc, c.EnableHostports),
+		podManager:         newPodManager(c.KClient, policy, c.MTU, c.CNIBinDir, oc, c.EnableHostports),
 		localIP:            c.SelfIP,
 		hostName:           c.Hostname,
 		useConnTrack:       useConnTrack,
@@ -182,7 +181,6 @@ func New(c *OsdnNodeConfig) (network.NodeInterface, error) {
 		mtu:                c.MTU,
 		egressPolicies:     make(map[uint32][]networkapi.EgressNetworkPolicy),
 		egressDNS:          common.NewEgressDNS(),
-		hostSubnetMap:      make(map[string]*networkapi.HostSubnet),
 		kubeInformers:      c.KubeInformers,
 		networkInformers:   c.NetworkInformers,
 		egressIP:           newEgressIPWatcher(oc, c.SelfIP, c.MasqueradeBit),
@@ -332,7 +330,8 @@ func (node *OsdnNode) Start() error {
 		return fmt.Errorf("node SDN setup failed: %v", err)
 	}
 
-	node.SubnetStartNode()
+	hsw := newHostSubnetWatcher(node.oc, node.localIP, node.networkInfo)
+	hsw.Start(node.networkInformers)
 
 	if err = node.policy.Start(node); err != nil {
 		return err

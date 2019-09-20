@@ -10,8 +10,6 @@ import (
 
 	"github.com/golang/glog"
 
-	networkapi "github.com/openshift/origin/pkg/network/apis/network"
-	"github.com/openshift/origin/pkg/network/common"
 	"github.com/openshift/origin/pkg/util/netutils"
 
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -136,9 +134,9 @@ func (plugin *OsdnNode) SetupSDN() (bool, error) {
 
 	var changed bool
 	if err := plugin.alreadySetUp(gwCIDR, clusterNetworkCIDRs); err == nil {
-		glog.V(5).Infof("[SDN setup] no SDN setup required: %v", err)
+		glog.V(5).Infof("[SDN setup] no SDN setup required")
 	} else {
-		glog.Infof("[SDN setup] full SDN setup required")
+		glog.Infof("[SDN setup] full SDN setup required (%v)", err)
 		if err := plugin.setup(clusterNetworkCIDRs, localSubnetCIDR, localSubnetGateway, gwCIDR); err != nil {
 			return false, err
 		}
@@ -156,7 +154,7 @@ func (plugin *OsdnNode) SetupSDN() (bool, error) {
 func (plugin *OsdnNode) setup(clusterNetworkCIDRs []string, localSubnetCIDR, localSubnetGateway, gwCIDR string) error {
 	serviceNetworkCIDR := plugin.networkInfo.ServiceNetwork.String()
 
-	if err := plugin.oc.SetupOVS(clusterNetworkCIDRs, serviceNetworkCIDR, localSubnetCIDR, localSubnetGateway); err != nil {
+	if err := plugin.oc.SetupOVS(clusterNetworkCIDRs, serviceNetworkCIDR, localSubnetCIDR, localSubnetGateway, plugin.mtu); err != nil {
 		return err
 	}
 
@@ -167,9 +165,6 @@ func (plugin *OsdnNode) setup(clusterNetworkCIDRs []string, localSubnetCIDR, loc
 		if err == nil {
 			defer deleteLocalSubnetRoute(Tun0, localSubnetCIDR)
 		}
-	}
-	if err == nil {
-		err = netlink.LinkSetMTU(l, int(plugin.mtu))
 	}
 	if err == nil {
 		err = netlink.LinkSetUp(l)
@@ -205,20 +200,6 @@ func (plugin *OsdnNode) updateEgressNetworkPolicyRules(vnid uint32) {
 	namespaces := plugin.policy.GetNamespaces(vnid)
 	if err := plugin.oc.UpdateEgressNetworkPolicyRules(policies, vnid, namespaces, plugin.egressDNS); err != nil {
 		utilruntime.HandleError(fmt.Errorf("Error updating OVS flows for EgressNetworkPolicy: %v", err))
-	}
-}
-
-func (plugin *OsdnNode) AddHostSubnetRules(subnet *networkapi.HostSubnet) {
-	glog.Infof("AddHostSubnetRules for %s", common.HostSubnetToString(subnet))
-	if err := plugin.oc.AddHostSubnetRules(subnet); err != nil {
-		utilruntime.HandleError(fmt.Errorf("Error adding OVS flows for subnet %q: %v", subnet.Subnet, err))
-	}
-}
-
-func (plugin *OsdnNode) DeleteHostSubnetRules(subnet *networkapi.HostSubnet) {
-	glog.Infof("DeleteHostSubnetRules for %s", common.HostSubnetToString(subnet))
-	if err := plugin.oc.DeleteHostSubnetRules(subnet); err != nil {
-		utilruntime.HandleError(fmt.Errorf("Error deleting OVS flows for subnet %q: %v", subnet.Subnet, err))
 	}
 }
 
